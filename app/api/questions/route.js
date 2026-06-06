@@ -1,51 +1,45 @@
 import { NextResponse } from 'next/server';
-import sqlite3 from 'sqlite3';
-import path from 'path';
+import { Pool } from 'pg';
 
-const dbPath = path.join(process.cwd(), 'database', 'app.db');
-const db = new sqlite3.Database(dbPath);
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
 
-// 获取所有题目
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const category = searchParams.get('category');
   const difficulty = searchParams.get('difficulty');
 
-  let sql = 'SELECT * FROM questions';
+  let query = 'SELECT * FROM questions';
   let params = [];
   let conditions = [];
 
   if (category) {
-    conditions.push('category = ?');
+    conditions.push(`category = $${params.length + 1}`);
     params.push(category);
   }
+
   if (difficulty) {
-    conditions.push('difficulty = ?');
+    conditions.push(`difficulty = $${params.length + 1}`);
     params.push(difficulty);
   }
 
   if (conditions.length > 0) {
-    sql += ' WHERE ' + conditions.join(' AND ');
+    query += ' WHERE ' + conditions.join(' AND ');
   }
 
-  sql += ' ORDER BY created_at DESC';
+  query += ' ORDER BY created_at DESC';
 
-  return new Promise((resolve) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) {
-        resolve(NextResponse.json({ error: err.message }, { status: 500 }));
-      } else {
-        const questions = rows.map(q => ({
-          ...q,
-          options: JSON.parse(q.options)
-        }));
-        resolve(NextResponse.json(questions));
-      }
-    });
-  });
+  const result = await pool.query(query, params);
+  const questions = result.rows.map(q => ({
+    ...q,
+    options: JSON.parse(q.options)
+  }));
+
+  return NextResponse.json(questions);
 }
 
-// 创建题目
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -55,28 +49,17 @@ export async function POST(request) {
       return NextResponse.json({ error: '缺少必填字段' }, { status: 400 });
     }
 
-    return new Promise((resolve) => {
-      db.run(
-        'INSERT INTO questions (question, options, answer, explanation, category, difficulty) VALUES (?, ?, ?, ?, ?, ?)',
-        [question, JSON.stringify(options), answer, explanation || '', category || '综合', difficulty || 1],
-        function(err) {
-          if (err) {
-            resolve(NextResponse.json({ error: err.message }, { status: 500 }));
-          } else {
-            resolve(NextResponse.json({ 
-              id: this.lastID, 
-              question, 
-              options, 
-              answer, 
-              explanation, 
-              category, 
-              difficulty 
-            }, { status: 201 }));
-          }
-        }
-      );
-    });
+    const result = await pool.query(
+      'INSERT INTO questions (question, options, answer, explanation, category, difficulty) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [question, JSON.stringify(options), answer, explanation, category || '综合', difficulty || 1]
+    );
+
+    const newQuestion = result.rows[0];
+    return NextResponse.json({
+      ...newQuestion,
+      options: JSON.parse(newQuestion.options)
+    }, { status: 201 });
   } catch (error) {
-    return NextResponse.json({ error: '请求体解析失败' }, { status: 400 });
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

@@ -1,16 +1,16 @@
 import { NextResponse } from 'next/server';
-import sqlite3 from 'sqlite3';
-import path from 'path';
+import { Pool } from 'pg';
 
-const dbPath = path.join(process.cwd(), 'database', 'app.db');
-const db = new sqlite3.Database(dbPath);
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
 
-// 获取所有训练场景
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const type = searchParams.get('type');
 
-  let sql = `
+  let query = `
     SELECT 
       ts.id,
       ts.title,
@@ -23,38 +23,26 @@ export async function GET(request) {
   let params = [];
 
   if (type) {
-    sql += ' WHERE ts.scenario_type = ?';
+    query += ' WHERE ts.scenario_type = $1';
     params.push(type);
   }
 
-  sql += ' ORDER BY ts.difficulty ASC, ts.created_at DESC';
+  query += ' ORDER BY ts.difficulty ASC, ts.created_at DESC';
 
-  return new Promise((resolve) => {
-    db.all(sql, params, (err, scenarios) => {
-      if (err) {
-        resolve(NextResponse.json({ error: err.message }, { status: 500 }));
-      } else {
-        // 为每个场景获取选项
-        const promises = scenarios.map((scenario) => {
-          return new Promise((res) => {
-            db.all(
-              'SELECT id, option_text, is_correct, feedback, score FROM scenario_options WHERE scenario_id = ?',
-              [scenario.id],
-              (err, options) => {
-                if (err) {
-                  res({ ...scenario, options: [] });
-                } else {
-                  res({ ...scenario, options });
-                }
-              }
-            );
-          });
-        });
+  const scenariosResult = await pool.query(query, params);
+  
+  const scenarios = await Promise.all(
+    scenariosResult.rows.map(async (scenario) => {
+      const optionsResult = await pool.query(
+        'SELECT id, option_text, is_correct, feedback, score FROM scenario_options WHERE scenario_id = $1',
+        [scenario.id]
+      );
+      return {
+        ...scenario,
+        options: optionsResult.rows
+      };
+    })
+  );
 
-        Promise.all(promises).then((results) => {
-          resolve(NextResponse.json(results));
-        });
-      }
-    });
-  });
+  return NextResponse.json(scenarios);
 }

@@ -1,100 +1,60 @@
 import { NextResponse } from 'next/server';
-import { db } from '../../../../database';
+import { Pool } from 'pg';
 
-// 获取单个题目
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
+
 export async function GET(request, { params }) {
   const { id } = params;
+  
+  const result = await pool.query('SELECT * FROM questions WHERE id = $1', [id]);
+  
+  if (result.rows.length === 0) {
+    return NextResponse.json({ error: '题目不存在' }, { status: 404 });
+  }
 
-  return new Promise((resolve) => {
-    db.get('SELECT * FROM questions WHERE id = ?', [id], (err, row) => {
-      if (err) {
-        resolve(NextResponse.json({ error: err.message }, { status: 500 }));
-      } else if (!row) {
-        resolve(NextResponse.json({ error: '题目不存在' }, { status: 404 }));
-      } else {
-        row.options = JSON.parse(row.options);
-        resolve(NextResponse.json(row));
-      }
-    });
+  const question = result.rows[0];
+  return NextResponse.json({
+    ...question,
+    options: JSON.parse(question.options)
   });
 }
 
-// 更新题目
 export async function PUT(request, { params }) {
-  const { id } = params;
-  
   try {
+    const { id } = params;
     const body = await request.json();
     const { question, options, answer, explanation, category, difficulty } = body;
 
-    return new Promise((resolve) => {
-      const updates = [];
-      const params = [];
+    const result = await pool.query(
+      'UPDATE questions SET question = $1, options = $2, answer = $3, explanation = $4, category = $5, difficulty = $6 WHERE id = $7 RETURNING *',
+      [question, JSON.stringify(options), answer, explanation, category, difficulty, id]
+    );
 
-      if (question) {
-        updates.push('question = ?');
-        params.push(question);
-      }
-      if (options) {
-        updates.push('options = ?');
-        params.push(JSON.stringify(options));
-      }
-      if (answer !== undefined) {
-        updates.push('answer = ?');
-        params.push(answer);
-      }
-      if (explanation !== undefined) {
-        updates.push('explanation = ?');
-        params.push(explanation);
-      }
-      if (category) {
-        updates.push('category = ?');
-        params.push(category);
-      }
-      if (difficulty !== undefined) {
-        updates.push('difficulty = ?');
-        params.push(difficulty);
-      }
+    if (result.rows.length === 0) {
+      return NextResponse.json({ error: '题目不存在' }, { status: 404 });
+    }
 
-      if (updates.length === 0) {
-        resolve(NextResponse.json({ error: '没有提供更新字段' }, { status: 400 }));
-        return;
-      }
-
-      params.push(id);
-
-      db.run(
-        'UPDATE questions SET ' + updates.join(', ') + ' WHERE id = ?',
-        params,
-        function(err) {
-          if (err) {
-            resolve(NextResponse.json({ error: err.message }, { status: 500 }));
-          } else if (this.changes === 0) {
-            resolve(NextResponse.json({ error: '题目不存在' }, { status: 404 }));
-          } else {
-            resolve(NextResponse.json({ message: '更新成功' }));
-          }
-        }
-      );
+    const updatedQuestion = result.rows[0];
+    return NextResponse.json({
+      ...updatedQuestion,
+      options: JSON.parse(updatedQuestion.options)
     });
   } catch (error) {
-    return NextResponse.json({ error: '请求体解析失败' }, { status: 400 });
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
-// 删除题目
 export async function DELETE(request, { params }) {
   const { id } = params;
+  
+  const result = await pool.query('DELETE FROM questions WHERE id = $1 RETURNING *', [id]);
+  
+  if (result.rows.length === 0) {
+    return NextResponse.json({ error: '题目不存在' }, { status: 404 });
+  }
 
-  return new Promise((resolve) => {
-    db.run('DELETE FROM questions WHERE id = ?', [id], function(err) {
-      if (err) {
-        resolve(NextResponse.json({ error: err.message }, { status: 500 }));
-      } else if (this.changes === 0) {
-        resolve(NextResponse.json({ error: '题目不存在' }, { status: 404 }));
-      } else {
-        resolve(NextResponse.json({ message: '删除成功' }));
-      }
-    });
-  });
+  return NextResponse.json({ message: '题目删除成功' });
 }
