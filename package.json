@@ -5,8 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "start": "node database/init.js && next start",
+    "lint": "eslint",
+    "init": "node database/init.js"
   },
   "dependencies": {
     "@ant-design/icons": "^6.2.5",
@@ -15,7 +16,8 @@
     "jsonwebtoken": "^9.0.3",
     "next": "16.2.7",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "sqlite3": "^5.1.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
