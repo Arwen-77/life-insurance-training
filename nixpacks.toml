@@ -1,0 +1,14 @@
+[phases.setup]
+cmds = ["npm install"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[phases.start]
+cmds = ["npm start"]
+
+[env]
+NODE_ENV = "production"
+
+[nix]
+pkgs = ["nodejs-18_x", "python3", "make", "gcc"]
